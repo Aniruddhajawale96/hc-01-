@@ -3,17 +3,24 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// Local MongoDB fallback for development
+const getMongoUri = () => {
+  if (process.env.NODE_ENV === 'development' && process.env.LOCAL_MONGO === 'true') {
+    return 'mongodb://admin:password123@localhost:27017/hospital-queue?authSource=admin';
+  }
+  return process.env.MONGO_URI;
+};
+
 const connectDB = async () => {
   const maxRetries = 5;
   const retryDelay = 2000;
   
   for (let i = 0; i < maxRetries; i++) {
     try {
-      const conn = await mongoose.connect(process.env.MONGO_URI, {
+      const conn = await mongoose.connect(getMongoUri(), {
         maxPoolSize: 10,
         serverSelectionTimeoutMS: 5000,
         socketTimeoutMS: 45000,
-        bufferMaxEntries: 0,
         bufferCommands: false,
       });
       
