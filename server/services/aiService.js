@@ -2,21 +2,7 @@ import axios from 'axios';
 
 const AI_URL = process.env.AI_URL || 'http://localhost:8001';
 
-// ── Predict wait time (with fallback) ──
-export const predictWaitTime = async (patientsAhead, avgTime, timeOfDay) => {
-  try {
-    const response = await axios.post(`${AI_URL}/predict`, {
-      patients_ahead: patientsAhead,
-      avg_time: avgTime,
-      time_of_day: timeOfDay,
-    }, { timeout: 3000 });
-    return response.data.estimated_wait;
-  } catch (error) {
-    // Fallback: local calculation when AI service is down
-    const timeFactor = 1 + 0.15 * Math.sin((timeOfDay * Math.PI) / 12);
-    return Math.round(patientsAhead * avgTime * timeFactor);
-  }
-};
+
 
 // ── Update AI model with completion data ──
 export const updateAiData = async (token) => {

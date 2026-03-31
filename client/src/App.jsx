@@ -1,5 +1,6 @@
 import { Routes, Route, Link, Navigate, useLocation } from 'react-router-dom';
 import { useState } from 'react';
+import ErrorBoundary from './components/ErrorBoundary';
 import Reception from './pages/Reception';
 import Doctor from './pages/Doctor';
 import Display from './pages/Display';
@@ -105,13 +106,15 @@ function App() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 py-8">
-        <Routes>
-          <Route path="/" element={<Navigate to="/reception" />} />
-          <Route path="/reception" element={<Reception />} />
-          <Route path="/doctor" element={<Doctor />} />
-          <Route path="/display" element={<Display />} />
-          <Route path="/emergency" element={<Emergency />} />
-        </Routes>
+        <ErrorBoundary>
+          <Routes>
+            <Route path="/" element={<Navigate to="/reception" />} />
+            <Route path="/reception" element={<Reception />} />
+            <Route path="/doctor" element={<Doctor />} />
+            <Route path="/display" element={<Display />} />
+            <Route path="/emergency" element={<Emergency />} />
+          </Routes>
+        </ErrorBoundary>
       </main>
     </div>
   );

@@ -3,6 +3,9 @@ import { getQueue } from './services/queueService.js';
 let ioInstance = null;
 
 export function getIO() {
+  if (!ioInstance) {
+    throw new Error('Socket.IO instance not initialized. Server not started?');
+  }
   return ioInstance;
 }
 
@@ -15,10 +18,19 @@ export default function socketHandler(io, socket) {
 
   // Join specific rooms on request
   socket.on('join_room', (room) => {
+    // Sanitize input
+    const sanitizedRoom = String(room).trim();
+    if (sanitizedRoom.length === 0 || sanitizedRoom.length > 50) {
+      socket.emit('error', { message: 'Invalid room name' });
+      return;
+    }
+    
     const validRooms = ['queue-room', 'doctor-room', 'display-room', 'reception-room'];
-    if (validRooms.includes(room)) {
-      socket.join(room);
-      console.log(`${socket.id} joined ${room}`);
+    if (validRooms.includes(sanitizedRoom)) {
+      socket.join(sanitizedRoom);
+      console.log(`${socket.id} joined ${sanitizedRoom}`);
+    } else {
+      socket.emit('error', { message: 'Invalid room' });
     }
   });
 

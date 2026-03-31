@@ -84,7 +84,7 @@ export default function useQueue() {
     socket.on('disconnect', () => setConnected(false));
 
     socket.on('token_created', (token) => {
-      fetchQueue();
+      // Only refetch stats, queue_updated will handle queue
       fetchStats();
     });
 
@@ -96,17 +96,17 @@ export default function useQueue() {
     });
 
     socket.on('patient_called', (token) => {
+      // Trust queue_updated for consistency
       setCurrentToken(token);
-      fetchQueue();
     });
 
-    socket.on('consultation_complete', () => {
-      fetchQueue();
-      fetchStats();
+    socket.on('consultation_complete', (token) => {
+      // Rely on queue_updated instead of full refetch
     });
 
-    socket.on('wait_time_updated', () => {
-      fetchStats();
+    socket.on('wait_time_updated', (data) => {
+      // Use stats from socket instead of API call
+      setStats(prev => ({ ...prev, ...data }));
     });
 
     socket.on('emergency_alert', () => {

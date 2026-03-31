@@ -21,7 +21,7 @@ router.post('/', tokenCreationLimiter, validateCreateToken, asyncHandler(async (
 // GET /api/tokens — Get current queue
 router.get('/', asyncHandler(async (req, res) => {
   const queue = await getQueue();
-  res.json({ success: true, data: queue });
+  res.status(200).json({ success: true, data: queue });
 }));
 
 // GET /api/tokens/:id — Get single token

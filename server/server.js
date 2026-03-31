@@ -53,22 +53,50 @@ io.on('connection', (socket) => {
   socketHandler(io, socket);
 });
 
-// ── Start ──
+// ── Start ── (FIXED: Added .catch() + process error handlers)
 const PORT = process.env.PORT || 5000;
 
-connectDB().then(() => {
-  server.listen(PORT, () => {
-    console.log(`\n🏥 Hospital Queue Server running on port ${PORT}`);
-    console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`   CORS Origin: ${CORS_ORIGIN}`);
-    console.log(`   API: http://localhost:${PORT}/api\n`);
+connectDB()
+  .then(() => {
+    server.listen(PORT, () => {
+      console.log(`\n🏥 Hospital Queue Server running on port ${PORT}`);
+      console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`   CORS Origin: ${CORS_ORIGIN}`);
+      console.log(`   API: http://localhost:${PORT}/api\n`);
+    });
+  })
+  .catch((error) => {
+    console.error('❌ Failed to connect to MongoDB:', error.message);
+    console.error('💥 Server startup failed. Exiting...');
+    process.exit(1);
+  });
+
+// Process error handlers (CRITICAL for production)
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error);
+  process.exit(1);
+});
+
+// Graceful shutdown handlers
+process.on('SIGTERM', () => {
+  console.log('🔴 SIGTERM received. Shutting down gracefully...');
+  server.close(() => {
+    console.log('✅ Server closed.');
+    process.exit(0);
   });
 });
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received. Shutting down gracefully...');
-  server.close(() => process.exit(0));
+process.on('SIGINT', () => {
+  console.log('🛑 SIGINT received (Ctrl+C). Shutting down gracefully...');
+  server.close(() => {
+    console.log('✅ Server closed.');
+    process.exit(0);
+  });
 });
 
 export { io };

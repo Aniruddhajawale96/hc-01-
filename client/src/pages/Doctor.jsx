@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import useQueue from '../hooks/useQueue';
 import QueueList from '../components/QueueList';
 import ConsultationTimer from '../components/ConsultationTimer';
@@ -13,12 +13,19 @@ export default function Doctor() {
 
   const waitingQueue = queue.filter(t => t.status === 'waiting');
 
-  // Fetch active session on mount
-  useEffect(() => {
-    api.getDoctorSession().then(res => {
+// Fetch active session - now updates after token completion too
+  const refetchSession = useCallback(async () => {
+    try {
+      const res = await api.getDoctorSession();
       const data = res.data || res;
-      if (data) setSession(data);
-    }).catch(() => {});
+      setSession(data);
+    } catch (err) {
+      console.error('Failed to fetch session:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    refetchSession();
   }, []);
 
   const handleStartSession = async () => {
@@ -53,11 +60,13 @@ export default function Doctor() {
     }
   };
 
+  // Updated handleComplete with session refresh
   const handleComplete = async () => {
     if (!currentToken) return;
     setError('');
     try {
       await completeToken(currentToken.tokenNumber);
+      await refetchSession(); // Refresh session to show updated tokensHandled count
     } catch (err) {
       setError(err.message);
     }

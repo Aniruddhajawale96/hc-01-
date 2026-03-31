@@ -7,6 +7,10 @@ export default function ConsultationTimer({ isActive, startTime, onComplete }) {
   useEffect(() => {
     if (isActive && startTime) {
       const start = new Date(startTime).getTime();
+      if (isNaN(start)) {
+        console.warn('Invalid startTime:', startTime);
+        return;
+      }
 
       const tick = () => {
         const now = Date.now();
