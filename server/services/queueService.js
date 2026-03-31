@@ -14,34 +14,37 @@ const getQueueState = async (date) => {
   return state;
 };
 
-// ── Generate a new token (OPTIMIZED: Reduced DB round-trips) ──
+// ── Generate a new token (FIXED: Resolved 'tokenNumber is required' error) ──
 export const generateToken = async ({ patientName, age, condition, priority, department }) => {
   const todayDate = getToday();
   const avgConsultTime = await getAvgConsultTime();
   
-  // Atomic increment + create token in single pipeline
-  const [state, token] = await Promise.all([
-    QueueState.findOneAndUpdate(
-      { date: todayDate, department: 'OPD' },
-      { $inc: { currentTokenNumber: 1, totalTokensIssued: 1 } },
-      { upsert: true, new: true }
-    ),
-    new Token({
-      patientName,
-      age: age || null,
-      condition: condition || '',
-      priority: priority || 'general',
-      isEmergency: priority === 'emergency',
-      department: department || 'OPD',
-      sessionDate: todayDate,
-    }).save()
-  ]);
+  // 1. Get next token number first (Atomic increment)
+  const state = await QueueState.findOneAndUpdate(
+    { date: todayDate, department: 'OPD' },
+    { $inc: { currentTokenNumber: 1, totalTokensIssued: 1 } },
+    { upsert: true, new: true }
+  );
 
-  token.tokenNumber = state.currentTokenNumber;
+  // 2. Create token instance WITHOUT saving yet
+  const token = new Token({
+    tokenNumber: state.currentTokenNumber, // Now we have it!
+    patientName,
+    age: age || null,
+    condition: condition || '',
+    priority: priority || 'general',
+    isEmergency: priority === 'emergency',
+    department: department || 'OPD',
+    sessionDate: todayDate,
+  });
+
+  // 3. Calculate wait time before saving (since it might need the token properties)
   token.estimatedWaitTime = await calculateWaitTime(token);
+
+  // 4. Save once with all required fields
   await token.save();
 
-  // Emit events
+  // 5. Emit events
   const io = getIO();
   if (io) {
     io.to('queue-room').emit('token_created', token);
