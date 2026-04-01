@@ -2,11 +2,57 @@ import { useState } from 'react';
 import * as api from '../services/api';
 
 export default function Emergency() {
-  const [form, setForm] = useState({ patientName: '', condition: '', lat: '', lng: '' });
+const [form, setForm] = useState({ patientName: '', condition: '', lat: '', lng: '' });
+  const [locationLoading, setLocationLoading] = useState(false);
+  const [locationError, setLocationError] = useState('');
+  const [useManualLocation, setUseManualLocation] = useState(true);
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [selectedHospital, setSelectedHospital] = useState(null);
+
+  const getCurrentLocation = () => {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error('Geolocation not supported by this browser'));
+        return;
+      }
+
+      setLocationLoading(true);
+      setLocationError('');
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve(position.coords);
+          setLocationLoading(false);
+        },
+        (error) => {
+          setLocationLoading(false);
+          let msg;
+          switch (error.code) {
+            case error.PERMISSION_DENIED:
+              msg = 'Location permission denied. Please enable location access.';
+              break;
+            case error.POSITION_UNAVAILABLE:
+              msg = 'Location information unavailable';
+              break;
+            case error.TIMEOUT:
+              msg = 'Location request timed out';
+              break;
+            default:
+              msg = 'Unable to retrieve location';
+          }
+          setLocationError(msg);
+          reject(new Error(msg));
+        },
+        { 
+          timeout: 15000,
+          enableHighAccuracy: true,
+          maximumAge: 300000
+        }
+      );
+    });
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -17,6 +63,21 @@ export default function Emergency() {
     if (!form.patientName.trim() || !form.condition.trim()) {
       setError('Patient name and condition are required');
       return;
+    }
+
+    // Auto-fetch location if not provided
+    if (!form.lat || !form.lng) {
+      try {
+        const coords = await getCurrentLocation();
+        setForm(prev => ({ 
+          ...prev, 
+          lat: coords.latitude.toString(), 
+          lng: coords.longitude.toString()
+        }));
+      } catch (err) {
+        setError(err.message);
+        return;
+      }
     }
 
     setLoading(true);
@@ -93,29 +154,102 @@ export default function Emergency() {
                   required
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1">Latitude</label>
-                  <input
-                    type="number"
-                    step="any"
-                    className="input-field text-sm"
-                    placeholder="28.6139"
-                    value={form.lat}
-                    onChange={e => setForm({ ...form, lat: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1">Longitude</label>
-                  <input
-                    type="number"
-                    step="any"
-                    className="input-field text-sm"
-                    placeholder="77.2090"
-                    value={form.lng}
-                    onChange={e => setForm({ ...form, lng: e.target.value })}
-                  />
-                </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-3 flex items-center justify-between">
+                  <span className="flex items-center gap-2">📍 Location</span>
+                  <button
+                    type="button"
+                    onClick={getCurrentLocation}
+                    disabled={locationLoading}
+                    className="px-4 py-2 bg-gradient-to-r from-sky-500 to-blue-600 text-white font-bold rounded-xl hover:from-sky-600 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl transition-all flex items-center gap-2 text-sm whitespace-nowrap"
+                  >
+                    {locationLoading ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Detecting...
+                      </>
+                    ) : (
+                      <>📱 Use My Location</>
+                    )}
+                  </button>
+                </label>
+
+                {locationError && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-xl mb-4 animate-fade-in">
+                    <p className="text-red-600 text-sm flex items-center gap-2 mb-2">
+                      <span>⚠️</span>{locationError}
+                    </p>
+                    <button 
+                      type="button"
+                      onClick={getCurrentLocation}
+                      className="text-xs bg-red-100 hover:bg-red-200 text-red-800 px-3 py-1 rounded-lg transition-all font-medium"
+                    >
+                      🔄 Try Again
+                    </button>
+                  </div>
+                )}
+
+                {form.lat && form.lng && !locationError && (
+                  <div className="p-4 rounded-xl border-2 mb-4 transition-all bg-gradient-to-r from-sky-50 to-blue-50 border-sky-200 shadow-sm">
+                    <p className="text-sm font-semibold text-slate-800 mb-2 flex items-center gap-2">
+                      <span>📍</span>Live Location Detected
+                    </p>
+                    <div className="font-mono bg-white px-4 py-2 rounded-lg border mb-3 text-sm text-slate-700">
+                      Lat: {parseFloat(form.lat).toFixed(5)} | Lng: {parseFloat(form.lng).toFixed(5)}
+                    </div>
+                    <div className="flex gap-3 text-xs">
+                      {!useManualLocation ? (
+                        <button
+                          type="button"
+                          onClick={() => setUseManualLocation(true)}
+                          className="flex-1 py-2 px-3 border border-dashed border-slate-300 text-slate-600 hover:border-slate-400 hover:text-slate-800 rounded-lg transition-all bg-white"
+                        >
+                          ✏️ Switch to manual input
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setUseManualLocation(false)}
+                          className="flex-1 py-2 px-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 font-medium rounded-lg transition-all shadow-sm"
+                        >
+                          ✅ Use live location
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {useManualLocation && (
+                  <>
+                    <div className="border-t border-slate-200 pt-4">
+                      <p className="text-xs text-slate-500 mb-3 italic">Manual coordinates (fallback)</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-500 mb-1">Latitude</label>
+                          <input
+                            type="number"
+                            step="any"
+                            className="input-field text-sm"
+                            placeholder="28.6139"
+                            value={form.lat}
+                            onChange={e => setForm({ ...form, lat: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-500 mb-1">Longitude</label>
+                          <input
+                            type="number"
+                            step="any"
+                            className="input-field text-sm"
+                            placeholder="77.2090"
+                            value={form.lng}
+                            onChange={e => setForm({ ...form, lng: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
               {error && (
