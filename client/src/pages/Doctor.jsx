@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import useQueue from '../hooks/useQueue';
+import { useQueue } from '../context/QueueContext';
+
 import QueueList from '../components/QueueList';
 import ConsultationTimer from '../components/ConsultationTimer';
 import StatsCard from '../components/StatsCard';

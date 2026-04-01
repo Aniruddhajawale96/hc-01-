@@ -4,14 +4,17 @@ import ErrorBoundary from './components/ErrorBoundary';
 import Reception from './pages/Reception';
 import Doctor from './pages/Doctor';
 import Display from './pages/Display';
-import Emergency from './pages/Emergency';
+import Home from './pages/Home';
+import NotFound from './pages/NotFound';
+
 
 const navItems = [
+  { path: '/home', label: 'Home', icon: '🏠', desc: 'Dashboard & demo' },
   { path: '/reception', label: 'Reception', icon: '🎫', desc: 'Register patients' },
   { path: '/doctor', label: 'Doctor', icon: '🩺', desc: 'Manage queue' },
   { path: '/display', label: 'Display', icon: '📺', desc: 'TV board' },
-  { path: '/emergency', label: 'Emergency', icon: '🚨', desc: 'AI redirect' },
 ];
+
 
 function App() {
   const location = useLocation();
@@ -52,9 +55,8 @@ function App() {
                   to={item.path}
                   className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-300 ${
                     location.pathname === item.path
-                      ? item.path === '/emergency'
-                        ? 'bg-red-100 text-red-700 shadow-sm'
-                        : 'bg-sky-100 text-sky-700 shadow-sm'
+? 'bg-sky-100 text-sky-700 shadow-sm'
+
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                   }`}
                 >
@@ -107,12 +109,13 @@ function App() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 py-8">
         <ErrorBoundary>
-          <Routes>
-            <Route path="/" element={<Navigate to="/reception" />} />
+<Routes>
+            <Route path="/" element={<Navigate to="/home" />} />
+            <Route path="/home" element={<Home />} />
             <Route path="/reception" element={<Reception />} />
             <Route path="/doctor" element={<Doctor />} />
             <Route path="/display" element={<Display />} />
-            <Route path="/emergency" element={<Emergency />} />
+            <Route path="*" element={<NotFound />} />
           </Routes>
         </ErrorBoundary>
       </main>

@@ -1,4 +1,5 @@
-import useQueue from '../hooks/useQueue';
+import { useQueue } from '../context/QueueContext';
+
 import QueueList from '../components/QueueList';
 import { useEffect, useState } from 'react';
 

@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import useQueue from '../hooks/useQueue';
+import { useQueue } from '../context/QueueContext';
+
 import StatsCard from '../components/StatsCard';
 import QueueList from '../components/QueueList';
 
