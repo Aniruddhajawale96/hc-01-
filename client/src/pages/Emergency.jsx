@@ -2,7 +2,7 @@ import { useState } from 'react';
 import * as api from '../services/api';
 
 export default function Emergency() {
-const [form, setForm] = useState({ patientName: '', condition: '', lat: '', lng: '' });
+  const [form, setForm] = useState({ patientName: '', condition: '', lat: '', lng: '' });
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationError, setLocationError] = useState('');
   const [useManualLocation, setUseManualLocation] = useState(true);
