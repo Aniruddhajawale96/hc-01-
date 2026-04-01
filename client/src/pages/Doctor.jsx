@@ -1,155 +1,195 @@
-import React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { stitch } from '../lib/stitch';
-import { useQueueStore } from '../store/useQueueStore';
-import { TokenBadge } from '../components/shared/TokenBadge';
-import { MetricCard } from '../components/shared/MetricCard';
-import { ActionButton } from '../components/shared/ActionButton';
-import { LiveDot } from '../components/shared/LiveDot';
-import { ConsultTimer } from '../components/shared/ConsultTimer';
-import { QueueItem } from '../components/shared/QueueItem';
-import { Clock, PlayCircle, Users, CheckCircle2 } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import useQueue from '../hooks/useQueue';
+import QueueList from '../components/QueueList';
+import ConsultationTimer from '../components/ConsultationTimer';
+import StatsCard from '../components/StatsCard';
+import * as api from '../services/api';
 
-export const Doctor = ({ showToast }) => {
-  const store = useQueueStore();
-  const current = store.getCurrent();
-  const queue = store.getWaiting();
-  const stats = store.getStats();
+export default function Doctor() {
+  const { queue, callNext, completeToken, currentToken, stats, loading, connected } = useQueue();
+  const [session, setSession] = useState(null);
+  const [doctorName, setDoctorName] = useState('');
+  const [error, setError] = useState('');
 
-  const handleCallNext = () => {
-    store.callNext();
-    showToast({ message: 'Calling next patient', type: 'info', key: Date.now() });
-  };
+  const waitingQueue = queue.filter(t => t.status === 'waiting');
 
-  const handleComplete = () => {
-    if (current) {
-      store.complete(current._id);
-      showToast({ message: 'Consultation marked as complete', type: 'success', key: Date.now() });
+// Fetch active session - now updates after token completion too
+  const refetchSession = useCallback(async () => {
+    try {
+      const res = await api.getDoctorSession();
+      const data = res.data || res;
+      setSession(data);
+    } catch (err) {
+      console.error('Failed to fetch session:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    refetchSession();
+  }, []);
+
+  const handleStartSession = async () => {
+    if (!doctorName.trim()) {
+      setError('Please enter your name');
+      return;
+    }
+    try {
+      const res = await api.startDoctorSession({ doctorName: doctorName.trim() });
+      setSession(res.data || res);
+      setError('');
+    } catch (err) {
+      setError(err.message);
     }
   };
 
-  return (
-    <div className="max-w-[740px] mx-auto pb-12">
-      
-      {/* Hero Card */}
-      <motion.div 
-        layout
-        className={`relative p-8 rounded-[24px] border border-border shadow-level-2 overflow-hidden transition-colors ${
-          current ? 'bg-card border-green/30' : 'bg-surface border-border'
-        }`}
-        style={current ? { boxShadow: '0 0 40px rgba(155, 169, 147, 0.15)' } : {}}
-      >
-        {/* Top Row */}
-        <div className="flex items-start justify-between mb-8">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface border border-border">
-            <LiveDot color={current ? '#9BA993' : '#8B9986'} active={true} />
-            <span className="text-[10px] font-bold text-text uppercase tracking-[0.2em]">NOW SERVING</span>
-          </div>
-          {current && (
-            <div className="flex flex-col items-end">
-              <span className="text-[11px] text-text-muted font-bold tracking-wider uppercase mb-1">TIMER</span>
-              <ConsultTimer startTime={current.calledAt} avgTimeMinutes={store.avgConsultTime} />
-            </div>
-          )}
-        </div>
+  const handleEndSession = async () => {
+    try {
+      await api.endDoctorSession();
+      setSession(null);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
 
-        {/* Center Content */}
-        <div className="flex flex-col items-center justify-center text-center min-h-[160px] pb-8">
-          <AnimatePresence mode="wait">
-            {current ? (
-              <motion.div 
-                key={current._id}
-                {...stitch.animate.fadeScale}
-                className="flex flex-col items-center"
-              >
-                <motion.div 
-                  key={`token-${current.tokenNumber}`}
-                  {...stitch.animate.countUp} // Simulate rapid switch with mount
-                  className="text-[96px] font-display font-black leading-none text-green mb-4 drop-shadow-[0_0_30px_rgba(155,169,147,0.4)]"
-                >
-                  {current.tokenNumber}
-                </motion.div>
-                <h2 className="text-[28px] font-bold text-text tracking-tight">{current.patientName}</h2>
-                <p className="text-[14px] font-mono text-text-muted mt-2">ID: {current.patientId}</p>
-              </motion.div>
-            ) : (
-              <motion.div 
-                key="idle"
-                {...stitch.animate.fadeScale}
-                className="text-text-muted flex flex-col items-center"
-              >
-                <div className="text-[64px] font-display font-black leading-none opacity-20 mb-4">—</div>
-                <h2 className="text-xl font-bold">No patient in consultation</h2>
-                <p className="text-sm mt-2 opacity-80">Call the next patient to begin.</p>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+  const handleCallNext = async () => {
+    setError('');
+    try {
+      await callNext();
+    } catch (err) {
+      setError(err.message || 'No patients waiting');
+    }
+  };
 
-        {/* Bottom Actions */}
-        <div className="flex flex-col sm:flex-row gap-4">
-          <ActionButton 
-            label="Call Next Patient" 
-            fullWidth 
-            onClick={handleCallNext} 
-            disabled={queue.length === 0}
-            icon={PlayCircle} 
-            color="cyan"
-          />
-          {current && (
-            <ActionButton 
-              label="Complete Consultation" 
-              fullWidth 
-              variant="secondary"
-              color="green"
-              icon={CheckCircle2} 
-              onClick={handleComplete} 
+  // Updated handleComplete with session refresh
+  const handleComplete = async () => {
+    if (!currentToken) return;
+    setError('');
+    try {
+      await completeToken(currentToken.tokenNumber);
+      await refetchSession(); // Refresh session to show updated tokensHandled count
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  // If no session, show session start screen
+  if (!session) {
+    return (
+      <div className="max-w-md mx-auto animate-fade-in">
+        <div className="glass-card p-10 text-center">
+          <span className="text-6xl block mb-4">👨‍⚕️</span>
+          <h2 className="text-2xl font-black text-slate-900 mb-2">Doctor Panel</h2>
+          <p className="text-slate-500 mb-8">Start your session to manage the queue</p>
+
+          <div className="space-y-4">
+            <input
+              type="text"
+              className="input-field text-center"
+              placeholder="Enter your name"
+              value={doctorName}
+              onChange={e => setDoctorName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleStartSession()}
             />
-          )}
+            {error && <p className="text-red-500 text-sm">{error}</p>}
+            <button onClick={handleStartSession} className="w-full btn-primary text-lg py-4">
+              🩺 Start Session
+            </button>
+          </div>
         </div>
-      </motion.div>
+      </div>
+    );
+  }
 
-      {/* Wait Time Strip */}
-      <div className="grid grid-cols-3 gap-3 my-8">
-        <MetricCard label="Avg Consult" value={stats.avgConsultTime} color="green" Icon={Clock} />
-        <MetricCard label="Wait Time" value={stats.estWaitTime} color="amber" Icon={Clock} />
-        <MetricCard label="Served Today" value={stats.served} color="purple" Icon={Users} />
+  const currentTokenStr = currentToken
+    ? `A${currentToken.tokenNumber.toString().padStart(3, '0')}`
+    : '---';
+
+  return (
+    <div className="max-w-6xl mx-auto animate-fade-in">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h2 className="text-3xl font-black text-slate-900">Doctor Panel</h2>
+          <p className="text-slate-500 mt-1">Dr. {session.doctorName} • Session Active</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${connected ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+            <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+            {connected ? 'Live' : 'Offline'}
+          </div>
+          <button onClick={handleEndSession} className="btn-outline text-sm py-2 px-4">
+            End Session
+          </button>
+        </div>
       </div>
 
-      {/* Upcoming Queue */}
-      <div className="mt-8">
-        <h3 className="text-[16px] font-bold text-text flex items-center gap-2 mb-4">
-          Up Next <span className="bg-surface text-text px-2 py-0.5 rounded-full text-xs border border-border">{queue.length}</span>
-        </h3>
-        
-        <ul className="flex flex-col gap-2">
-          <AnimatePresence>
-            {queue.slice(0, 5).map((token, idx) => (
-              <motion.li 
-                key={token._id}
-                {...stitch.animate.slideOut}
-                {...stitch.animate.reorderItem}
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className={`flex items-center gap-4 p-3 rounded-2xl bg-surface border transition-colors ${
-                  idx === 0 ? 'border-accent/40 bg-card shadow-level-1' : 'border-transparent'
-                }`}
-              >
-                <div className="w-8 text-center text-[12px] font-mono text-text-muted font-bold">#{idx + 1}</div>
-                <TokenBadge number={token.tokenNumber} size="sm" status={token.status} animated={false} />
-                <div className="flex-1 font-bold text-text truncate ml-2">{token.patientName}</div>
-                <div className="text-[11px] font-mono text-amber">
-                  ETA: {Math.max(1, (idx + 1) * stats.avgConsultTime)}m
+      {/* Stats Row */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <StatsCard icon="⏳" label="Waiting" value={waitingQueue.length} color="sky" />
+        <StatsCard icon="🩺" label="In Progress" value={currentToken ? 1 : 0} color="emerald" />
+        <StatsCard icon="✅" label="Handled" value={session.tokensHandled || 0} color="purple" />
+        <StatsCard icon="⏱️" label="Avg Time" value={`${stats?.avgConsultTime || 10}m`} color="amber" />
+      </div>
+
+      {error && (
+        <div className="mb-6 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm flex items-center gap-2 animate-slide-up">
+          <span>⚠️</span> {error}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Left: Current Patient + Timer */}
+        <div className="space-y-6">
+          <div className="glass-card p-8">
+            <h3 className="text-lg font-bold text-slate-800 mb-2 text-center">Now Serving</h3>
+            <div className="text-center my-6">
+              <div className={`inline-block token-display ${currentToken ? 'text-emerald-600' : 'text-slate-300'}`}>
+                {currentTokenStr}
+              </div>
+              {currentToken && (
+                <div className="mt-3">
+                  <p className="text-lg font-semibold text-slate-700">{currentToken.patientName}</p>
+                  <span className={currentToken.priority === 'emergency' ? 'badge-emergency' : currentToken.priority === 'senior' ? 'badge-senior' : 'badge-general'}>
+                    {currentToken.priority}
+                  </span>
+                  {currentToken.condition && (
+                    <p className="text-sm text-slate-500 mt-2">{currentToken.condition}</p>
+                  )}
                 </div>
-              </motion.li>
-            ))}
-          </AnimatePresence>
-          {queue.length === 0 && (
-            <div className="text-sm text-text-muted italic py-4 text-center">Queue is currently empty.</div>
-          )}
-        </ul>
-      </div>
+              )}
+            </div>
 
+            <ConsultationTimer
+              isActive={!!currentToken}
+              startTime={currentToken?.calledAt}
+              onComplete={currentToken ? handleComplete : undefined}
+            />
+          </div>
+
+          {/* Call Next Button */}
+          <button
+            onClick={handleCallNext}
+            disabled={loading || waitingQueue.length === 0}
+            className="w-full btn-primary text-xl py-6 font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading ? '⏳ Calling...' : waitingQueue.length === 0 ? '📋 No Patients Waiting' : `📢 Call Next Patient (${waitingQueue.length} waiting)`}
+          </button>
+        </div>
+
+        {/* Right: Queue */}
+        <div className="glass-card p-6">
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-lg font-bold text-slate-800">Waiting Queue ({waitingQueue.length})</h3>
+            <span className="px-3 py-1 bg-sky-100 text-sky-700 rounded-full text-xs font-bold">
+              Priority Sorted
+            </span>
+          </div>
+          <QueueList
+            queue={waitingQueue}
+            isDoctorView={false}
+          />
+        </div>
+      </div>
     </div>
   );
-};
+}
