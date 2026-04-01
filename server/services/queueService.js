@@ -4,57 +4,77 @@ import { getIO } from '../socketHandler.js';
 
 const getToday = () => new Date().toISOString().split('T')[0];
 
-// ── Get or create today's queue state ──
+// ── Helper: Get current daily state ──
 const getQueueState = async (date) => {
   const targetDate = date || getToday();
   let state = await QueueState.findOne({ date: targetDate, department: 'OPD' });
   if (!state) {
-    state = await QueueState.create({ date: targetDate, department: 'OPD', currentTokenNumber: 0 });
+    state = await QueueState.create({ 
+      date: targetDate, 
+      department: 'OPD', 
+      currentTokenNumber: 0,
+      waitingCount: 0,
+      totalTokensIssued: 0
+    });
   }
   return state;
 };
 
-// ── Generate a new token (FIXED: Resolved 'tokenNumber is required' error) ──
-export const generateToken = async ({ patientName, age, condition, priority, department }) => {
+// ── Generate a new token (Refactored Clean Version + Advanced Features) ──
+export const generateToken = async ({
+  patientName,
+  age,
+  condition,
+  priority = 'general',
+  department = 'OPD',
+}) => {
   const todayDate = getToday();
-  const avgConsultTime = await getAvgConsultTime();
   
-  // 1. Get next token number first (Atomic increment)
+  // Map 'normal' to 'general' (schema compatibility)
+  const mappedPriority = priority === 'normal' ? 'general' : priority;
+
+  // 1. Atomic increment of token number
   const state = await QueueState.findOneAndUpdate(
     { date: todayDate, department: 'OPD' },
-    { $inc: { currentTokenNumber: 1, totalTokensIssued: 1 } },
+    { $inc: { currentTokenNumber: 1, totalTokensIssued: 1, waitingCount: 1 } },
     { upsert: true, new: true }
   );
 
-  // 2. Create token instance WITHOUT saving yet
-  const token = new Token({
-    tokenNumber: state.currentTokenNumber, // Now we have it!
+  // 3. Calculate initial wait time estimate (needed for the create call)
+  const estimatedWaitTime = await calculateWaitTime({
+    priority: mappedPriority,
+    createdAt: new Date(),
+    sessionDate: todayDate
+  });
+
+  // 4. Save to MongoDB with requested logs
+  console.log("About to save token");
+  const token = await Token.create({
+    tokenNumber: state.currentTokenNumber,
     patientName,
     age: age || null,
     condition: condition || '',
-    priority: priority || 'general',
-    isEmergency: priority === 'emergency',
+    priority: mappedPriority,
     department: department || 'OPD',
+    status: 'waiting',
+    isEmergency: mappedPriority === 'emergency',
     sessionDate: todayDate,
+    estimatedWaitTime
   });
 
-  // 3. Calculate wait time before saving (since it might need the token properties)
-  token.estimatedWaitTime = await calculateWaitTime(token);
+  console.log("Saved token:", token);
 
-  // 4. Save once with all required fields
-  await token.save();
-
-  // 5. Emit events
+  // 5. Emit real-time events
   const io = getIO();
   if (io) {
     io.to('queue-room').emit('token_created', token);
-    await emitQueueUpdate().catch(console.error);
+    await emitQueueUpdate();
   }
 
   return token;
 };
 
-// ── Get active queue (priority-sorted: emergency → senior → general, then FIFO) ──
+// ── Get active queue (Sorted by Priority & Status) ──
 export const getQueue = async () => {
   const avgConsult = await getAvgConsultTime();
   const timeFactor = 1 + 0.15 * Math.sin((new Date().getHours() * Math.PI) / 12);
@@ -68,6 +88,7 @@ export const getQueue = async () => {
   const statusOrder = { 'in-progress': 0, 'waiting': 1, 'done': 2 };
   const priorityOrder = { 'emergency': 0, 'senior': 1, 'general': 2 };
 
+  // Sort: In-Progress first, then by Priority, then FIFO (createdAt)
   tokens.sort((a, b) => {
     if (statusOrder[a.status] !== statusOrder[b.status]) {
       return statusOrder[a.status] - statusOrder[b.status];
@@ -81,6 +102,7 @@ export const getQueue = async () => {
     return new Date(b.updatedAt) - new Date(a.updatedAt);
   });
 
+  // Dynamic wait-time recalculation
   let waitPos = 0;
   return tokens.map(t => {
     if (t.status === 'waiting') {
@@ -95,12 +117,11 @@ export const getQueue = async () => {
   });
 };
 
-// ── Call next patient (respects priority) ──
+// ── Call next patient (Priority-Respecting Search) ──
 export const callNextToken = async () => {
-  // Priority order: emergency → senior → general, then FIFO within each
   const priorityOrder = ['emergency', 'senior', 'general'];
-
   let nextToken = null;
+
   for (const p of priorityOrder) {
     nextToken = await Token.findOneAndUpdate(
       { sessionDate: getToday(), status: 'waiting', priority: p },
@@ -114,10 +135,11 @@ export const callNextToken = async () => {
     throw new Error('No waiting patients in queue');
   }
 
+  // Update real-time state
   const io = getIO();
   if (io) {
     io.to('queue-room').emit('patient_called', nextToken);
-    await emitQueueUpdate().catch(console.error);
+    await emitQueueUpdate();
   }
 
   return nextToken;
@@ -131,165 +153,99 @@ export const completeToken = async (tokenNumber) => {
     { new: true }
   );
 
-  if (!token) {
-    throw new Error('Token not found or not in-progress');
-  }
+  if (!token) throw new Error('Token not found or not in-progress');
 
-  // Calculate consultation duration
+  // Log performance metrics
   if (token.calledAt) {
-    token.consultationDuration = Math.round(
-      (token.completedAt - token.calledAt) / 60000
-    );
+    token.consultationDuration = Math.round((token.completedAt - token.calledAt) / 60000);
     await token.save();
   }
 
-  // Update queue state
-  const state = await getQueueState();
-  state.totalCompleted += 1;
-  await state.save();
+  // Decr waiting count & incr completed
+  await QueueState.findOneAndUpdate(
+    { date: getToday(), department: 'OPD' },
+    { $inc: { waitingCount: -1, totalCompleted: 1 } }
+  );
 
   const io = getIO();
   if (io) {
     io.to('queue-room').emit('consultation_complete', token);
-    await emitQueueUpdate().catch(console.error);
+    await emitQueueUpdate();
   }
 
   return token;
 };
 
-// ── Cancel a token ──
-export const cancelToken = async (tokenId) => {
-  const token = await Token.findOneAndUpdate(
-    { _id: tokenId, status: { $in: ['waiting', 'in-progress'] } },
-    { status: 'cancelled', cancelledAt: new Date() },
-    { new: true }
-  );
-
-  if (!token) {
-    throw new Error('Token not found or already completed/cancelled');
-  }
-
-  const state = await getQueueState();
-  state.totalCancelled += 1;
-  await state.save();
-
-  await emitQueueUpdate().catch(console.error);
-  return token;
-};
-
-// ── Get single token details ──
-export const getTokenById = async (tokenId) => {
-  const token = await Token.findById(tokenId).lean();
-  if (!token) throw new Error('Token not found');
-  return token;
-};
-
-// ── Calculate average consultation time (rolling window) - CACHED ──
+// ── Helper: Rolling Average Consultation Time ──
 let avgConsultCache = 10;
 let cacheTimestamp = 0;
-const CACHE_TTL = 60 * 1000; // 1 minute
+const CACHE_TTL = 60 * 1000;
 
 export const getAvgConsultTime = async () => {
   const now = Date.now();
-  
-  // Return cache if valid
-  if (now - cacheTimestamp < CACHE_TTL) {
-    return avgConsultCache;
-  }
-  
-  try {
-    const recent = await Token.find({
-      status: 'done',
-      consultationDuration: { $gt: 0 },
-    })
-      .sort({ completedAt: -1 })
-      .limit(20)
-      .select('consultationDuration')
-      .lean();
+  if (now - cacheTimestamp < CACHE_TTL) return avgConsultCache;
 
-    if (recent.length === 0) {
-      avgConsultCache = 10;
-    } else {
+  try {
+    const recent = await Token.find({ status: 'done', consultationDuration: { $gt: 0 } })
+      .sort({ completedAt: -1 }).limit(20).select('consultationDuration').lean();
+
+    if (recent.length > 0) {
       const total = recent.reduce((sum, t) => sum + t.consultationDuration, 0);
       avgConsultCache = Math.round(total / recent.length);
     }
-    
     cacheTimestamp = now;
     return avgConsultCache;
-  } catch (error) {
-    console.error('Cache refresh failed:', error.message);
-    return avgConsultCache; // Return stale cache on error
+  } catch (err) {
+    return avgConsultCache;
   }
 };
 
-// ── Calculate wait time for a specific token (FIXED: Correct priority logic) ──
+// ── Helper: Calculate single token wait time ──
 export const calculateWaitTime = async (token) => {
   const sessionDate = getToday();
-  const tokenPriority = token.priority || 'general';
+  const p = token.priority || 'general';
   
-  // Correct logic for counting patients ahead:
-  // 1. ALL higher priority patients (regardless of creation time)
-  // 2. Same priority patients created BEFORE this token
-  let higherPriorityQuery = {};
-  let samePriorityQuery = {};
+  let hPriorityQuery = {};
+  let sPriorityQuery = {};
   
-  switch (tokenPriority) {
-    case 'emergency':
-      // Emergency only waits for other emergencies created before it
-      samePriorityQuery = { 
-        priority: 'emergency', 
-        createdAt: { $lt: token.createdAt } 
-      };
-      break;
-      
-    case 'senior':
-      // Seniors wait for ALL emergencies + seniors before them
-      higherPriorityQuery = { priority: 'emergency' };
-      samePriorityQuery = { 
-        priority: 'senior', 
-        createdAt: { $lt: token.createdAt } 
-      };
-      break;
-      
-    case 'general':
-    default:
-      // General wait for ALL emergencies + ALL seniors + generals before them
-      higherPriorityQuery = { priority: { $in: ['emergency', 'senior'] } };
-      samePriorityQuery = { 
-        priority: 'general', 
-        createdAt: { $lt: token.createdAt } 
-      };
-      break;
+  if (p === 'emergency') {
+    sPriorityQuery = { priority: 'emergency', createdAt: { $lt: token.createdAt } };
+  } else if (p === 'senior') {
+    hPriorityQuery = { priority: 'emergency' };
+    sPriorityQuery = { priority: 'senior', createdAt: { $lt: token.createdAt } };
+  } else {
+    hPriorityQuery = { priority: { $in: ['emergency', 'senior'] } };
+    sPriorityQuery = { priority: 'general', createdAt: { $lt: token.createdAt } };
   }
-  
+
   const waitingAhead = await Token.countDocuments({
-    sessionDate,
-    status: 'waiting',
-    $or: [
-      higherPriorityQuery,
-      samePriorityQuery
-    ].filter(q => Object.keys(q).length > 0)  // Filter out empty queries
+    sessionDate, status: 'waiting',
+    $or: [hPriorityQuery, sPriorityQuery].filter(q => Object.keys(q).length > 0)
   });
 
-  const avgConsult = await getAvgConsultTime();
-  const hour = new Date().getHours();
-  const timeFactor = 1 + 0.15 * Math.sin((hour * Math.PI) / 12);
-
-  return Math.round(waitingAhead * avgConsult * timeFactor);
+  const avgTime = await getAvgConsultTime();
+  return waitingAhead * avgTime;
 };
 
-// ── Emit queue update to all clients ──
+// ── Core Helper: Push updates to all panels ──
 export const emitQueueUpdate = async () => {
   const io = getIO();
   if (io) {
     const queue = await getQueue();
-    const avgConsultTime = await getAvgConsultTime(); // Single call
-    const queueLength = queue.filter(t => t.status === 'waiting').length;
-    
+    const waitStats = {
+      avgWait: await getAvgConsultTime(),
+      queueLength: queue.filter(t => t.status === 'waiting').length
+    };
     io.to('queue-room').emit('queue_updated', queue);
-    io.to('queue-room').emit('wait_time_updated', {
-      avgWait: avgConsultTime,
-      queueLength,
-    });
+    io.to('queue-room').emit('wait_time_updated', waitStats);
   }
+};
+
+// ── Extra Handlers ──
+export const getTokenById = async (id) => Token.findById(id).lean();
+export const cancelToken = async (id) => {
+  const token = await Token.findByIdAndUpdate(id, { status: 'cancelled', cancelledAt: new Date() }, { new: true });
+  await QueueState.findOneAndUpdate({ date: getToday(), department: 'OPD' }, { $inc: { waitingCount: -1, totalCancelled: 1 } });
+  await emitQueueUpdate();
+  return token;
 };

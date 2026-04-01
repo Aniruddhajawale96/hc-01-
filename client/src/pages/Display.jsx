@@ -1,134 +1,187 @@
-import useQueue from '../hooks/useQueue';
-import QueueList from '../components/QueueList';
-import { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { stitch } from '../lib/stitch';
+import { useQueueStore } from '../store/useQueueStore';
+import { LiveDot } from '../components/shared/LiveDot';
+import { Activity } from 'lucide-react';
 
-export default function Display() {
-  const { queue, currentToken, stats, connected } = useQueue();
-  const waitingQueue = queue.filter(t => t.status === 'waiting');
+export const Display = () => {
+  const store = useQueueStore();
+  const current = store.getCurrent();
+  const queue = store.getWaiting();
+  const stats = store.getStats();
+
   const [time, setTime] = useState(new Date());
 
   useEffect(() => {
-    const tick = setInterval(() => setTime(new Date()), 1000);
-    return () => clearInterval(tick);
+    const i = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(i);
   }, []);
 
-  const currentStr = currentToken
-    ? `A${currentToken.tokenNumber.toString().padStart(3, '0')}`
-    : '---';
-
-  const nextTokens = waitingQueue.slice(0, 6);
+  const timeStr = time.toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit' });
+  const dateStr = time.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 
   return (
-    <div className="fixed inset-0 bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 text-white overflow-auto">
-      {/* Top Bar */}
-      <div className="flex items-center justify-between px-8 py-4 bg-black/20 border-b border-white/10">
-        <div className="flex items-center gap-3">
-          <span className="text-2xl">🏥</span>
-          <h1 className="text-xl font-bold tracking-wide">HOSPITAL OPD QUEUE</h1>
-        </div>
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2">
-            <span className={`w-2.5 h-2.5 rounded-full ${connected ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
-            <span className="text-sm text-white/70">{connected ? 'LIVE' : 'OFFLINE'}</span>
+    <div className="flex flex-col h-screen overflow-hidden bg-bg text-text selection:bg-transparent">
+      
+      {/* HEADER BAR (80px) */}
+      <header className="h-[100px] shrink-0 border-b border-border shadow-[0_4px_30px_rgba(0,0,0,0.5)] flex items-center justify-between px-10 bg-surface/50">
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-accent-glow text-accent rounded-2xl border border-accent/20">
+            <Activity size={36} strokeWidth={3} />
           </div>
-          <div className="text-right">
-            <p className="text-lg font-mono font-bold">{time.toLocaleTimeString()}</p>
-            <p className="text-xs text-white/50">{time.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })}</p>
-          </div>
+          <span className="font-display font-extrabold text-[36px] tracking-tight text-text shadow-sm">
+            SmartClinic OPD
+          </span>
         </div>
-      </div>
+        
+        <div className="flex flex-col items-end">
+          <span className="font-mono text-[48px] font-bold text-accent leading-none drop-shadow-[0_0_15px_rgba(74,93,78,0.4)]">
+            {timeStr}
+          </span>
+          <span className="text-[18px] text-text-muted font-bold tracking-widest uppercase mt-2">
+            {dateStr}
+          </span>
+        </div>
+      </header>
 
-      <div className="p-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* NOW SERVING — Large Display */}
-          <div className="lg:col-span-5">
-            <div className={`glass-card-dark p-12 text-center h-full flex flex-col justify-center ${currentToken?.isEmergency ? 'animate-emergency border-red-500/50' : 'animate-glow border-emerald-500/30'} border-2`}>
-              <p className="text-sm uppercase tracking-[0.3em] text-white/50 mb-6">Now Serving</p>
-              <div className={`text-[8rem] md:text-[10rem] lg:text-[12rem] font-black leading-none ${currentToken?.isEmergency ? 'text-red-400' : 'text-emerald-400'}`}>
-                {currentStr}
-              </div>
-              {currentToken && (
-                <div className="mt-6 space-y-2">
-                  <p className="text-xl text-white/80 font-semibold">{currentToken.patientName}</p>
-                  <span className={`inline-flex px-4 py-1.5 rounded-full text-sm font-bold ${
-                    currentToken.priority === 'emergency' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
-                    currentToken.priority === 'senior' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
-                    'bg-sky-500/20 text-sky-400 border border-sky-500/30'
-                  }`}>
-                    {currentToken.priority === 'emergency' ? '🚨 EMERGENCY' : currentToken.priority === 'senior' ? '👴 Senior' : '🏥 General'}
-                  </span>
-                </div>
+      {/* MAIN SECTION */}
+      <main className="flex-1 flex min-h-0 bg-bg">
+        
+        {/* Left panel (60%) — NOW SERVING */}
+        <div className="flex-[6_6_0%] border-r border-border p-16 flex flex-col justify-center items-center relative overflow-hidden">
+          
+          <div className="absolute top-12 left-12 flex items-center gap-3 bg-green-glow px-6 py-3 rounded-full border border-green/30">
+            <LiveDot color="#9BA993" size="16px" active={true} />
+            <span className="text-[18px] font-bold tracking-[0.2em] text-green uppercase drop-shadow-sm">Now Serving</span>
+          </div>
+
+          <div className="flex flex-col items-center justify-center text-center mt-8">
+            <AnimatePresence mode="wait">
+              {current ? (
+                <motion.div 
+                  key={current._id}
+                  {...stitch.animate.fadeScale}
+                  className="flex flex-col items-center"
+                >
+                  {/* Huge token number */}
+                  <motion.div
+                    key={`token-${current.tokenNumber}`}
+                    {...stitch.animate.countUp}
+                    className="text-[250px] font-display font-black leading-none text-green drop-shadow-[0_0_80px_rgba(155,169,147,0.3)] mb-8"
+                  >
+                    {current.tokenNumber}
+                  </motion.div>
+                  
+                  {/* Patient Name */}
+                  <div className="text-[64px] font-bold text-text tracking-tight drop-shadow-md">
+                    {current.patientName}
+                  </div>
+                  
+                  {/* Directional Subtext */}
+                  <div className="text-[28px] text-text-muted mt-6 font-medium bg-surface/50 px-8 py-4 rounded-full border border-border">
+                    Please proceed to consultation room
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div 
+                  key="idle"
+                  {...stitch.animate.fadeScale}
+                  className="flex flex-col items-center opacity-40"
+                >
+                  <div className="text-[250px] font-display font-black leading-none text-border mb-8">—</div>
+                  <div className="text-[48px] font-bold tracking-tight">Waiting for patient...</div>
+                </motion.div>
               )}
+            </AnimatePresence>
+          </div>
+        </div>
+
+        {/* Right panel (40%) — QUEUE INFO */}
+        <div className="flex-[4_4_0%] p-12 bg-surface/30 flex flex-col">
+          
+          <div className="flex items-center justify-between mb-8 pb-4 border-b border-border">
+            <h2 className="text-[24px] font-bold tracking-wider text-text-muted uppercase">Up Next</h2>
+            <div className="text-[24px] font-display font-bold text-accent bg-accent-glow px-4 py-1 rounded-full">
+              {queue.length} Wait
             </div>
           </div>
 
-          {/* RIGHT SIDE: Next Up + Stats */}
-          <div className="lg:col-span-7 space-y-8">
-            {/* Next Tokens Grid */}
-            <div>
-              <h2 className="text-lg font-bold text-white/60 uppercase tracking-wider mb-4">Next Up</h2>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {nextTokens.length > 0 ? nextTokens.map((token, index) => (
-                  <div
-                    key={token._id}
-                    className={`glass-card-dark p-6 text-center transition-all duration-500 hover:scale-105 animate-slide-up ${
-                      token.isEmergency ? 'border-red-500/30 animate-emergency' : ''
-                    }`}
-                    style={{ animationDelay: `${index * 100}ms` }}
-                  >
-                    <div className={`text-3xl md:text-4xl font-black mb-2 ${
-                      token.priority === 'emergency' ? 'text-red-400' :
-                      token.priority === 'senior' ? 'text-amber-400' : 'text-white/90'
-                    }`}>
-                      A{token.tokenNumber.toString().padStart(3, '0')}
+          <ul className="flex flex-col gap-4 flex-1">
+            <AnimatePresence>
+              {queue.slice(0, 5).map((token, idx) => (
+                <motion.li
+                  key={token._id}
+                  {...stitch.animate.reorderItem}
+                  initial={{ opacity: 0, x: 50 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, scale: 0.9, x: -50 }}
+                  className="flex items-center gap-6 p-6 rounded-[24px] bg-card border border-border/50 shadow-level-1"
+                >
+                  <div className="w-[48px] h-[48px] shrink-0 rounded-full bg-surface border border-border flex items-center justify-center font-display text-[24px] font-bold text-text-muted">
+                    {idx + 1}
+                  </div>
+                  
+                  <div className="w-[96px] h-[96px] shrink-0 rounded-full bg-bg border-4 border-amber flex items-center justify-center font-display text-[42px] font-black text-amber shadow-[0_0_20px_rgba(212,163,115,0.2)]">
+                    {token.tokenNumber}
+                  </div>
+                  
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[32px] font-bold text-text truncate drop-shadow-sm mb-2">
+                      {token.patientName}
                     </div>
-                    <p className="text-sm text-white/50 truncate">{token.patientName}</p>
-                    <div className="mt-2 flex items-center justify-center gap-1">
-                      <span className={`w-2 h-2 rounded-full ${
-                        token.priority === 'emergency' ? 'bg-red-500 animate-pulse' :
-                        token.priority === 'senior' ? 'bg-amber-500' : 'bg-sky-500'
-                      }`} />
-                      <span className="text-xs text-white/40 capitalize">{token.priority}</span>
-                    </div>
-                    {token.estimatedWaitTime > 0 && (
-                      <p className="text-xs text-white/30 mt-1">~{Math.round(token.estimatedWaitTime)} min</p>
+                    {token.priority === 'emergency' && (
+                      <span className="inline-block px-3 py-1 bg-red/20 text-red text-[16px] font-bold tracking-wider rounded-full border border-red/30">
+                        URGENT
+                      </span>
                     )}
                   </div>
-                )) : (
-                  <div className="col-span-full text-center py-12 text-white/30">
-                    <span className="text-4xl block mb-2">📋</span>
-                    <p className="text-lg">No patients waiting</p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Stats Bar */}
-            <div className="grid grid-cols-4 gap-4">
-              {[
-                { label: 'Waiting', value: waitingQueue.length, color: 'from-sky-500/20 to-blue-500/20 border-sky-500/20' },
-                { label: 'Completed', value: stats?.completed || 0, color: 'from-emerald-500/20 to-green-500/20 border-emerald-500/20' },
-                { label: 'Avg Wait', value: `${stats?.avgConsultTime || 10}m`, color: 'from-amber-500/20 to-orange-500/20 border-amber-500/20' },
-                { label: 'Total', value: stats?.totalTokens || queue.length, color: 'from-purple-500/20 to-violet-500/20 border-purple-500/20' },
-              ].map(s => (
-                <div key={s.label} className={`bg-gradient-to-br ${s.color} border rounded-xl p-4 text-center`}>
-                  <p className="text-2xl font-black text-white/90">{s.value}</p>
-                  <p className="text-xs text-white/50 uppercase tracking-wider mt-1">{s.label}</p>
-                </div>
+                </motion.li>
               ))}
-            </div>
-
-            {/* Full Queue */}
-            <div className="glass-card-dark p-6">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-bold text-white/70">Full Queue ({waitingQueue.length})</h3>
-                <span className="text-xs text-white/30">Auto-refreshing via WebSocket</span>
+            </AnimatePresence>
+            
+            {queue.length === 0 && (
+              <div className="flex-1 flex items-center justify-center">
+                <p className="text-[32px] font-bold text-text-muted italic opacity-50">Queue is empty</p>
               </div>
-              <QueueList queue={waitingQueue} displayMode />
+            )}
+          </ul>
+
+          {/* Wait Time Display block */}
+          <div className="mt-8 pt-8 border-t border-border flex items-center justify-between bg-card p-8 rounded-[32px] border border-accent/20 shadow-[0_0_40px_rgba(74,93,78,0.05)]">
+            <div>
+              <div className="text-[18px] font-bold text-text-muted tracking-widest uppercase mb-2">Estimated Wait</div>
+              <div className="text-[20px] text-text-muted opacity-80">Based on AI historical data</div>
+            </div>
+            <div className="flex items-baseline gap-4">
+              <motion.div 
+                key={stats.estWaitTime}
+                {...stitch.animate.countUp}
+                className="text-[100px] font-display font-black leading-none text-amber drop-shadow-[0_0_30px_rgba(212,163,115,0.2)]"
+              >
+                {stats.estWaitTime}
+              </motion.div>
+              <span className="text-[32px] font-bold text-text-muted">mins</span>
             </div>
           </div>
         </div>
-      </div>
+      </main>
+
+      {/* BOTTOM TICKER (60px) */}
+      <footer className="h-[60px] shrink-0 bg-accent text-black overflow-hidden flex items-center font-bold text-[20px]">
+        <div className="whitespace-nowrap animate-[marquee_20s_linear_infinite] inline-block">
+          <span className="mx-8">&bull;</span> Please keep your token ready. 
+          <span className="mx-8">&bull;</span> Estimated wait time for new patients is {stats.estWaitTime + stats.avgConsultTime} minutes.
+          <span className="mx-8">&bull;</span> In case of emergency, please notify the reception immediately.
+          <span className="mx-8">&bull;</span> Thank you for choosing SmartClinic!
+          {/* Duplicate to appear continuous */}
+          <span className="mx-8">&bull;</span> Please keep your token ready. 
+          <span className="mx-8">&bull;</span> Estimated wait time for new patients is {stats.estWaitTime + stats.avgConsultTime} minutes.
+          <span className="mx-8">&bull;</span> In case of emergency, please notify the reception immediately.
+          <span className="mx-8">&bull;</span> Thank you for choosing SmartClinic!
+        </div>
+      </footer>
+
     </div>
   );
-}
+};
